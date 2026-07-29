@@ -256,6 +256,40 @@ def build_trade_context(trade: dict, provider, post_hours: int = 4) -> dict | No
     if eq:
         ctx["entry_quality"] = eq
 
+    # --- extended chart reads at entry (deterministic, no lookahead) --------
+    sr = support_resistance(candles, trade["open_time"])
+    if sr:
+        ctx["support_resistance"] = sr
+    ms = market_structure(candles, trade["open_time"])
+    if ms:
+        ctx["market_structure_at_entry"] = ms
+    cp = candle_pattern(candles, trade["open_time"])
+    if cp:
+        ctx["candle_pattern_at_entry"] = cp
+    roc = momentum_roc(candles, trade["open_time"])
+    if roc is not None:
+        ctx["momentum_roc10_pct"] = roc
+    vr = volume_read(candles, trade["open_time"])
+    if vr is not None:
+        ctx["entry_volume_vs_avg"] = vr
+
+    # --- deterministic per-trade scores (same data -> same score) -----------
+    # Entry score: start at 10, subtract for adverse excursion depth.
+    adv = (eq or {}).get("max_adverse_pct", 0.0)
+    entry_score = max(1, round(10 - min(adv, 4.5) * 2))
+    # Exit score: start at 10, subtract for move left on the table.
+    left = (ee or {}).get("extra_move_pct", 0.0)
+    exit_score = max(1, round(10 - min(left, 4.5) * 2))
+    # Risk score: stop set is the base; a contained loss keeps it high.
+    _p = float(trade.get("profit", 0) or 0)
+    risk_score = 5
+    if ctx.get("sl_was_set"):
+        risk_score += 4
+    if _p >= 0:
+        risk_score += 1
+    risk_score = min(risk_score, 10)
+    ctx["scores"] = {"entry": entry_score, "exit": exit_score, "risk": risk_score}
+
     # --- deterministic plain-English verdicts -------------------------------
     # These are FINISHED sentences the model must use as-is. They exist because
     # letting the model interpret raw signed fields (market_move_pct + alignment
@@ -315,6 +349,32 @@ def build_trade_context(trade: dict, provider, post_hours: int = 4) -> dict | No
         rsi_v = entry_snap["rsi14"]
         state = entry_snap.get("rsi_state", "neutral")
         facts.append(f"At entry RSI(14) was {rsi_v} ({state}).")
+
+    ms_v = ctx.get("market_structure_at_entry")
+    if ms_v:
+        facts.append(f"At entry the market structure read {ms_v.lower()} "
+                     f"(from recent swing highs and lows).")
+    sr_v = ctx.get("support_resistance")
+    if sr_v:
+        bits = []
+        if "resistance_dist_pct" in sr_v:
+            bits.append(f"nearest resistance {sr_v['resistance_dist_pct']:.2f}% above")
+        if "support_dist_pct" in sr_v:
+            bits.append(f"nearest support {sr_v['support_dist_pct']:.2f}% below")
+        if bits:
+            facts.append("At entry, " + " and ".join(bits) + " the price.")
+    cp_v = ctx.get("candle_pattern_at_entry")
+    if cp_v:
+        facts.append(f"The entry candle formed a {cp_v.replace('_', ' ')} pattern.")
+    vr_v = ctx.get("entry_volume_vs_avg")
+    if vr_v is not None:
+        if vr_v >= 1.5:
+            facts.append(f"Entry volume ran {vr_v:.1f}x the recent average, an active market.")
+        elif vr_v <= 0.6:
+            facts.append(f"Entry volume was thin at {vr_v:.1f}x the recent average.")
+    roc_v = ctx.get("momentum_roc10_pct")
+    if roc_v is not None:
+        facts.append(f"Momentum over the prior 10 candles was {roc_v:+.2f}%.")
 
     ctx["verdicts"] = facts
     ctx["result"] = "win" if won else "loss"
