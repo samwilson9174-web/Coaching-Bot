@@ -161,7 +161,8 @@ class BinanceProvider:
                 out.append({
                     "time": datetime.utcfromtimestamp(k[0] / 1000).strftime(FMT),
                     "open": float(k[1]), "high": float(k[2]),
-                    "low": float(k[3]), "close": float(k[4])})
+                    "low": float(k[3]), "close": float(k[4]),
+                    "volume": float(k[5])})
             last_open = rows[-1][0]
             if len(rows) < 1000 or last_open >= end_ms:
                 break
