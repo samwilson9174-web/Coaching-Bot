@@ -1,0 +1,14 @@
+anthropic>=0.40.0
+python-dotenv>=1.0.0
+openpyxl>=3.1.0           # for reading .xlsx exports (file data source)
+# MT5Manager is NOT on PyPI. Install the wheel provided with your MT5 server
+# licence on the host that runs the live data pull, e.g.:
+#   pip install MT5Manager-<version>-cp312-cp312-win_amd64.whl
+# The bot runs fine without it when USE_MOCK_DATA=1.
+
+# ---- Brokeret cloud source (DATA_SOURCE=brokeret) ----
+# Only install the one matching your BROKERET_TRANSPORT. http/ftp use stdlib.
+#   sftp -> paramiko
+#   s3   -> boto3
+# paramiko>=3.4.0
+# boto3>=1.34.0
