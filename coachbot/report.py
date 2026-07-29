@@ -246,6 +246,21 @@ def run_reports(force=False):
                 contexts = [c for t in recent
                             if (c := build_trade_context(t, provider)) is not None]
 
+                # deterministic period scores from per-trade scores + metrics
+                tscores = [c["scores"] for c in contexts if "scores" in c]
+                if tscores:
+                    period_scores = {
+                        "entry": round(sum(s["entry"] for s in tscores) / len(tscores)),
+                        "exit": round(sum(s["exit"] for s in tscores) / len(tscores)),
+                        "risk_management": round(sum(s["risk"] for s in tscores) / len(tscores)),
+                        "discipline": min(10, round(metrics.get("sl_set_pct", 0) / 10)),
+                    }
+                else:
+                    period_scores = {"entry": None, "exit": None,
+                                     "risk_management": None,
+                                     "discipline": min(10, round(metrics.get("sl_set_pct", 0) / 10))}
+                metrics = {**metrics, "period_scores": period_scores}
+
                 text = generate_report(name.split()[0] if name else "there",
                                        metrics, contexts, config)
                 verdict = check_output(text)
