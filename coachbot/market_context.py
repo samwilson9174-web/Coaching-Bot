@@ -58,7 +58,8 @@ class MockMarketProvider:
             hi = max(o, c) * (1 + rng.uniform(0, 0.002))
             lo = min(o, c) * (1 - rng.uniform(0, 0.002))
             out.append({"time": t.strftime(FMT), "open": o, "high": hi,
-                        "low": lo, "close": c})
+                        "low": lo, "close": c,
+                        "volume": 100 * (1 + rng.uniform(-0.5, 1.5))})
             price = c
             t += timedelta(hours=1)
         return out
