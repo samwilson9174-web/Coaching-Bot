@@ -195,3 +195,117 @@ def entry_quality(candles, side, entry_time, entry_price, lookahead_hours=12):
         worst_adverse = max(worst_adverse, adverse)
     return {"max_adverse_pct": round(worst_adverse, 2),
             "note": ("entry_saw_drawdown" if worst_adverse > 0.5 else "entry_clean")}
+
+# ---------------------------------------------------------------------------
+# Extended chart analysis: volume, support/resistance, market structure,
+# candlestick pattern, momentum. All computed from candles. No lookahead:
+# every function uses only candles at or before `when`.
+
+def _swings(candles, k=2):
+    """Fractal swing highs/lows: a high greater than k neighbours each side
+    (and mirror for lows). Returns (swing_highs, swing_lows) as lists of
+    (index, price)."""
+    highs, lows = [], []
+    for i in range(k, len(candles) - k):
+        h = candles[i]["high"]; l = candles[i]["low"]
+        if all(h > candles[i - j]["high"] and h > candles[i + j]["high"] for j in range(1, k + 1)):
+            highs.append((i, h))
+        if all(l < candles[i - j]["low"] and l < candles[i + j]["low"] for j in range(1, k + 1)):
+            lows.append((i, l))
+    return highs, lows
+
+
+def support_resistance(candles, when, lookback=60):
+    """Nearest swing resistance above and support below the price at `when`,
+    from the last `lookback` candles before it. Distances in %."""
+    upto = _candles_upto(candles, when)[-lookback:]
+    if len(upto) < 10:
+        return None
+    price = upto[-1]["close"]
+    highs, lows = _swings(upto)
+    res = [p for _, p in highs if p > price]
+    sup = [p for _, p in lows if p < price]
+    out = {"price": round(price, 4)}
+    if res:
+        r = min(res)
+        out["resistance"] = round(r, 4)
+        out["resistance_dist_pct"] = round((r - price) / price * 100, 2)
+    if sup:
+        s = max(sup)
+        out["support"] = round(s, 4)
+        out["support_dist_pct"] = round((price - s) / price * 100, 2)
+    return out if ("resistance" in out or "support" in out) else None
+
+
+def market_structure(candles, when, lookback=80):
+    """Classify structure from the last swings before `when`:
+    higher highs + higher lows -> UPTREND; lower highs + lower lows ->
+    DOWNTREND; otherwise RANGE. Needs at least 2 swing highs and 2 lows."""
+    upto = _candles_upto(candles, when)[-lookback:]
+    highs, lows = _swings(upto)
+    if len(highs) < 2 or len(lows) < 2:
+        return None
+    hh = highs[-1][1] > highs[-2][1]
+    hl = lows[-1][1] > lows[-2][1]
+    lh = highs[-1][1] < highs[-2][1]
+    ll = lows[-1][1] < lows[-2][1]
+    if hh and hl:
+        return "UPTREND"
+    if lh and ll:
+        return "DOWNTREND"
+    return "RANGE"
+
+
+def candle_pattern(candles, when):
+    """Simple single/two-candle pattern at the candle containing `when`:
+    bullish/bearish engulfing, doji, hammer, shooting star. Returns a name or
+    None. Deterministic OHLC geometry only."""
+    upto = _candles_upto(candles, when)
+    if len(upto) < 2:
+        return None
+    c, p = upto[-1], upto[-2]
+    body = abs(c["close"] - c["open"]); rng = c["high"] - c["low"]
+    if rng <= 0:
+        return None
+    upper = c["high"] - max(c["open"], c["close"])
+    lower = min(c["open"], c["close"]) - c["low"]
+    p_body_hi, p_body_lo = max(p["open"], p["close"]), min(p["open"], p["close"])
+    if body / rng < 0.1:
+        return "doji"
+    if lower > 2 * body and upper < body:
+        return "hammer"
+    if upper > 2 * body and lower < body:
+        return "shooting_star"
+    if c["close"] > c["open"] and p["close"] < p["open"] \
+            and c["close"] >= p_body_hi and c["open"] <= p_body_lo:
+        return "bullish_engulfing"
+    if c["close"] < c["open"] and p["close"] > p["open"] \
+            and c["open"] >= p_body_hi and c["close"] <= p_body_lo:
+        return "bearish_engulfing"
+    return None
+
+
+def momentum_roc(candles, when, n=10):
+    """Rate of change over the last n candles before `when`, in %."""
+    upto = _candles_upto(candles, when)
+    if len(upto) < n + 1:
+        return None
+    now, past = upto[-1]["close"], upto[-n - 1]["close"]
+    if not past:
+        return None
+    return round((now - past) / past * 100, 2)
+
+
+def volume_read(candles, when, n=20):
+    """Entry-candle volume vs the average of the prior n candles. Returns a
+    ratio (1.0 = average) or None when the feed has no volume."""
+    upto = _candles_upto(candles, when)
+    if len(upto) < n + 1 or "volume" not in upto[-1]:
+        return None
+    vols = [c.get("volume") for c in upto[-n - 1:-1] if c.get("volume")]
+    if not vols:
+        return None
+    avg = sum(vols) / len(vols)
+    if avg <= 0:
+        return None
+    return round(upto[-1]["volume"] / avg, 2)
