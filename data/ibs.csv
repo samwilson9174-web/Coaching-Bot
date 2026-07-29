@@ -1,0 +1,4 @@
+ib_id,name,parent_ib_id,tier,rate_per_lot,telegram_id,email
+IB100,Tariq Mahmood,,Shogun,8,@tariq_m,tariq@partners.example
+IB200,Yusuf Khan,IB100,Daimyo,6,@yusuf_ib,yusuf@partners.example
+IB201,Aisha Rahman,IB100,Samurai,5,@aisha_ib,aisha@partners.example
