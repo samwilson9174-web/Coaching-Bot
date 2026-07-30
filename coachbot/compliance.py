@@ -31,6 +31,8 @@ FORBIDDEN_PATTERNS = [
     r"\bliquidity (grab|pool|sweep|hunt)\b",
     r"\bstop[- ]hunt",
     r"\btrapped (traders|buyers|sellers)\b",
+    r"\bsignals? to watch\b",
+    r"\badd (this|a) rule to (your|the)\b",
     r"\binstitutions? (were|was|are|is) (accumulat|distribut)",
 ]
 
