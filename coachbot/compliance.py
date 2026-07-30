@@ -33,6 +33,8 @@ FORBIDDEN_PATTERNS = [
     r"\btrapped (traders|buyers|sellers)\b",
     r"\bsignals? to watch\b",
     r"\badd (this|a) rule to (your|the)\b",
+    r"\bwould (likely |probably )?have (captured|caught|secured|banked|added|yielded)\b",
+    r"\binstitutional (participation|activity|buying|selling)\b",
     r"\binstitutions? (were|was|are|is) (accumulat|distribut)",
 ]
 
