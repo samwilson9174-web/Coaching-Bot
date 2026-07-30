@@ -196,6 +196,7 @@ def entry_quality(candles, side, entry_time, entry_price, lookahead_hours=12):
     return {"max_adverse_pct": round(worst_adverse, 2),
             "note": ("entry_saw_drawdown" if worst_adverse > 0.5 else "entry_clean")}
 
+
 # ---------------------------------------------------------------------------
 # Extended chart analysis: volume, support/resistance, market structure,
 # candlestick pattern, momentum. All computed from candles. No lookahead:
@@ -309,3 +310,132 @@ def volume_read(candles, when, n=20):
     if avg <= 0:
         return None
     return round(upto[-1]["volume"] / avg, 2)
+
+
+# ---------------------------------------------------------------------------
+# Professional-grade additions: MFE, VWAP, OBV, ADX, RSI divergence.
+# All deterministic, all no-lookahead (only candles at/before `when`).
+
+def favorable_excursion(candles, side, entry_time, entry_price, exit_time):
+    """Max favorable excursion during the hold: the best the trade EVER looked
+    before exit, in %. Mirror of max adverse excursion."""
+    et, xt = _dt(entry_time), _dt(exit_time)
+    window = [c for c in candles if et <= _dt(c["time"]) <= xt]
+    if not window:
+        return None
+    side = side.lower()
+    best = 0.0
+    for c in window:
+        if side in ("buy", "long"):
+            fav = (c["high"] - entry_price) / entry_price * 100
+        else:
+            fav = (entry_price - c["low"]) / entry_price * 100
+        best = max(best, fav)
+    return round(best, 2)
+
+
+def vwap_read(candles, when, n=24):
+    """Rolling VWAP of the last n candles before `when` (typical price x
+    volume). Returns price distance from VWAP in %, or None without volume."""
+    upto = _candles_upto(candles, when)[-n:]
+    if len(upto) < 5 or "volume" not in upto[-1]:
+        return None
+    num = den = 0.0
+    for c in upto:
+        v = c.get("volume") or 0
+        tp = (c["high"] + c["low"] + c["close"]) / 3
+        num += tp * v
+        den += v
+    if den <= 0:
+        return None
+    vwap = num / den
+    price = upto[-1]["close"]
+    return {"vwap": round(vwap, 4),
+            "dist_pct": round((price - vwap) / vwap * 100, 2)}
+
+
+def obv_trend(candles, when, n=30, step=10):
+    """On-balance volume direction: OBV now vs OBV `step` candles ago over the
+    last n candles. Returns 'rising', 'falling' or 'flat'."""
+    upto = _candles_upto(candles, when)[-n:]
+    if len(upto) < step + 2 or "volume" not in upto[-1]:
+        return None
+    obv = [0.0]
+    for i in range(1, len(upto)):
+        v = upto[i].get("volume") or 0
+        if upto[i]["close"] > upto[i - 1]["close"]:
+            obv.append(obv[-1] + v)
+        elif upto[i]["close"] < upto[i - 1]["close"]:
+            obv.append(obv[-1] - v)
+        else:
+            obv.append(obv[-1])
+    delta = obv[-1] - obv[-1 - step]
+    scale = max(abs(x) for x in obv) or 1
+    if abs(delta) < 0.05 * scale:
+        return "flat"
+    return "rising" if delta > 0 else "falling"
+
+
+def adx(candles, when, n=14):
+    """Wilder's ADX(14) with +DI/-DI at `when`. Returns dict or None."""
+    upto = _candles_upto(candles, when)
+    if len(upto) < 2 * n + 1:
+        return None
+    plus_dm, minus_dm, trs = [], [], []
+    for i in range(1, len(upto)):
+        up = upto[i]["high"] - upto[i - 1]["high"]
+        dn = upto[i - 1]["low"] - upto[i]["low"]
+        plus_dm.append(up if (up > dn and up > 0) else 0.0)
+        minus_dm.append(dn if (dn > up and dn > 0) else 0.0)
+        h, l, pc = upto[i]["high"], upto[i]["low"], upto[i - 1]["close"]
+        trs.append(max(h - l, abs(h - pc), abs(l - pc)))
+    def wilder(series):
+        s = sum(series[:n])
+        out = [s]
+        for x in series[n:]:
+            s = s - s / n + x
+            out.append(s)
+        return out
+    tr_s, pdm_s, mdm_s = wilder(trs), wilder(plus_dm), wilder(minus_dm)
+    dxs = []
+    for t, p, m in zip(tr_s, pdm_s, mdm_s):
+        if t <= 0:
+            continue
+        pdi, mdi = 100 * p / t, 100 * m / t
+        if pdi + mdi == 0:
+            continue
+        dxs.append(100 * abs(pdi - mdi) / (pdi + mdi))
+    if len(dxs) < n:
+        return None
+    a = sum(dxs[:n]) / n
+    for x in dxs[n:]:
+        a = (a * (n - 1) + x) / n
+    t, p, m = tr_s[-1], pdm_s[-1], mdm_s[-1]
+    pdi = round(100 * p / t, 1) if t else None
+    mdi = round(100 * m / t, 1) if t else None
+    return {"adx": round(a, 1), "di_plus": pdi, "di_minus": mdi}
+
+
+def rsi_divergence(candles, when, lookback=80):
+    """Conservative two-swing divergence check before `when`: price higher
+    high with lower RSI -> bearish divergence; price lower low with higher
+    RSI -> bullish. Returns 'bearish', 'bullish' or None. Only fires on a
+    clear signal (RSI gap >= 2 points)."""
+    upto = _candles_upto(candles, when)[-lookback:]
+    if len(upto) < 40:
+        return None
+    closes = [c["close"] for c in upto]
+    highs, lows = _swings(upto)
+    def rsi_at(i):
+        return rsi(closes[: i + 1], 14)
+    if len(highs) >= 2:
+        (i1, p1), (i2, p2) = highs[-2], highs[-1]
+        r1, r2 = rsi_at(i1), rsi_at(i2)
+        if r1 is not None and r2 is not None and p2 > p1 and (r1 - r2) >= 2:
+            return "bearish"
+    if len(lows) >= 2:
+        (i1, p1), (i2, p2) = lows[-2], lows[-1]
+        r1, r2 = rsi_at(i1), rsi_at(i2)
+        if r1 is not None and r2 is not None and p2 < p1 and (r2 - r1) >= 2:
+            return "bullish"
+    return None
