@@ -31,12 +31,63 @@ def _post(token, method, payload):
         return {"ok": False, "error": str(e)}
 
 
+MAX_LEN = 3900  # Telegram hard limit is 4096; leave headroom
+
+
+def _chunks(text, limit=MAX_LEN):
+    """Split long text into <=limit pieces, preferring paragraph breaks,
+    then line breaks, then a hard cut. Order preserved."""
+    if len(text) <= limit:
+        return [text]
+    parts, buf = [], ""
+    for para in text.split("\n\n"):
+        candidate = (buf + "\n\n" + para) if buf else para
+        if len(candidate) <= limit:
+            buf = candidate
+            continue
+        if buf:
+            parts.append(buf)
+            buf = ""
+        if len(para) <= limit:
+            buf = para
+            continue
+        # paragraph itself too long: split on lines, then hard-cut
+        line_buf = ""
+        for line in para.split("\n"):
+            cand = (line_buf + "\n" + line) if line_buf else line
+            if len(cand) <= limit:
+                line_buf = cand
+            else:
+                if line_buf:
+                    parts.append(line_buf)
+                while len(line) > limit:
+                    parts.append(line[:limit])
+                    line = line[limit:]
+                line_buf = line
+        if line_buf:
+            buf = line_buf
+    if buf:
+        parts.append(buf)
+    return parts
+
+
 def send_message(token, chat_id, text, dry_run=True):
     if dry_run:
-        return {"status": "DRY_RUN", "chat_id": chat_id}
-    resp = _post(token, "sendMessage", {"chat_id": chat_id, "text": text,
-                                        "disable_web_page_preview": True})
-    if resp.get("ok"):
-        return {"status": "sent", "chat_id": chat_id,
-                "message_id": resp["result"]["message_id"]}
-    return {"status": "failed", "chat_id": chat_id, "error": resp.get("error") or resp}
+        return {"status": "DRY_RUN", "chat_id": chat_id,
+                "parts": len(_chunks(text))}
+    pieces = _chunks(text)
+    sent_ids = []
+    for i, piece in enumerate(pieces, 1):
+        resp = _post(token, "sendMessage", {"chat_id": chat_id, "text": piece,
+                                            "disable_web_page_preview": True})
+        if resp.get("ok"):
+            sent_ids.append(resp["result"]["message_id"])
+            continue
+        detail = resp.get("body") or ""
+        return {"status": "failed", "chat_id": chat_id,
+                "error": f"{resp.get('error') or resp} {detail}".strip(),
+                "failed_part": f"{i}/{len(pieces)}",
+                "sent_message_ids": sent_ids}
+    return {"status": "sent", "chat_id": chat_id,
+            "message_id": sent_ids[-1] if sent_ids else None,
+            "parts": len(pieces), "message_ids": sent_ids}
