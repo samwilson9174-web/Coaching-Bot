@@ -32,7 +32,8 @@ from datetime import datetime, timedelta, timezone
 from .logger import get_logger
 from .indicators import (indicator_snapshot, exit_efficiency, entry_quality,
                          support_resistance, market_structure, candle_pattern,
-                         momentum_roc, volume_read)
+                         momentum_roc, volume_read, favorable_excursion,
+                         vwap_read, obv_trend, adx, rsi_divergence)
 
 log = get_logger("market")
 
@@ -272,6 +273,40 @@ def build_trade_context(trade: dict, provider, post_hours: int = 4) -> dict | No
     vr = volume_read(candles, trade["open_time"])
     if vr is not None:
         ctx["entry_volume_vs_avg"] = vr
+    vw = vwap_read(candles, trade["open_time"])
+    if vw:
+        ctx["vwap_at_entry"] = vw
+    ob = obv_trend(candles, trade["open_time"])
+    if ob:
+        ctx["obv_trend_at_entry"] = ob
+    ax = adx(candles, trade["open_time"])
+    if ax:
+        ctx["adx_at_entry"] = ax
+    dv = rsi_divergence(candles, trade["open_time"])
+    if dv:
+        ctx["rsi_divergence_at_entry"] = dv
+    mfe = favorable_excursion(candles, direction, trade["open_time"], p_open,
+                              trade["close_time"])
+    if mfe is not None:
+        ctx["max_favorable_pct"] = mfe
+    # designed reward-to-risk from the order's own SL/TP where present
+    try:
+        _e = float(trade.get("open_price") or p_open)
+        _sl = float(trade.get("sl") or 0)
+        _tp = float(trade.get("tp") or 0)
+        if _sl and _tp and abs(_e - _sl) > 0:
+            ctx["designed_rr"] = round(abs(_tp - _e) / abs(_e - _sl), 2)
+    except (TypeError, ValueError):
+        pass
+    # higher-timeframe bias: structure on a wide pre-entry window
+    try:
+        o_dt = _dt(trade["open_time"])
+        htf = provider.get_candles(trade["symbol"], o_dt - timedelta(days=45), o_dt)
+        hb = market_structure(htf, trade["open_time"], lookback=250)
+        if hb:
+            ctx["htf_bias"] = hb
+    except Exception:
+        pass
 
     # --- deterministic per-trade scores (same data -> same score) -----------
     # Entry score: start at 10, subtract for adverse excursion depth.
@@ -372,6 +407,40 @@ def build_trade_context(trade: dict, provider, post_hours: int = 4) -> dict | No
             facts.append(f"Entry volume ran {vr_v:.1f}x the recent average, an active market.")
         elif vr_v <= 0.6:
             facts.append(f"Entry volume was thin at {vr_v:.1f}x the recent average.")
+    vw_v = ctx.get("vwap_at_entry")
+    if vw_v:
+        side_of = "above" if vw_v["dist_pct"] >= 0 else "below"
+        facts.append(f"Price sat {abs(vw_v['dist_pct']):.2f}% {side_of} the "
+                     f"rolling VWAP at entry.")
+    ob_v = ctx.get("obv_trend_at_entry")
+    if ob_v and ob_v != "flat":
+        facts.append(f"On-balance volume was {ob_v} into the entry.")
+    ax_v = ctx.get("adx_at_entry")
+    if ax_v and ax_v.get("adx") is not None:
+        strength = ("a strong trend" if ax_v["adx"] >= 25
+                    else "a weak or ranging trend" if ax_v["adx"] < 20
+                    else "a developing trend")
+        dom = ""
+        if ax_v.get("di_plus") is not None and ax_v.get("di_minus") is not None:
+            dom = (", buyers dominant" if ax_v["di_plus"] > ax_v["di_minus"]
+                   else ", sellers dominant")
+        facts.append(f"ADX(14) read {ax_v['adx']} at entry, {strength}{dom}.")
+    dv_v = ctx.get("rsi_divergence_at_entry")
+    if dv_v:
+        facts.append(f"A {dv_v} RSI divergence had printed in the swings "
+                     f"before entry.")
+    mfe_v = ctx.get("max_favorable_pct")
+    if mfe_v is not None:
+        facts.append(f"At its best the trade was {mfe_v:.2f}% in profit "
+                     f"before it closed.")
+    rr_v = ctx.get("designed_rr")
+    if rr_v is not None:
+        facts.append(f"The order's own stop and target framed a designed "
+                     f"reward-to-risk of {rr_v}.")
+    hb_v = ctx.get("htf_bias")
+    if hb_v:
+        facts.append(f"The higher-timeframe structure read {hb_v.lower()} "
+                     f"going into the trade.")
     roc_v = ctx.get("momentum_roc10_pct")
     if roc_v is not None:
         facts.append(f"Momentum over the prior 10 candles was {roc_v:+.2f}%.")
