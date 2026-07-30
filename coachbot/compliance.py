@@ -27,6 +27,11 @@ FORBIDDEN_PATTERNS = [
     r"\byou could have (made|saved|earned|captured|avoided|gained)\b",
     r"\bexit(ing)? at [0-9]",
     r"\benter(ing)? at [0-9]",
+    r"\bsmart money\b",
+    r"\bliquidity (grab|pool|sweep|hunt)\b",
+    r"\bstop[- ]hunt",
+    r"\btrapped (traders|buyers|sellers)\b",
+    r"\binstitutions? (were|was|are|is) (accumulat|distribut)",
 ]
 
 
