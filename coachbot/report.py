@@ -207,7 +207,7 @@ def generate_report(first_name, metrics, contexts, cfg) -> str:
         for attempt in range(3):
             try:
                 resp = client.messages.create(
-                    model=cfg.CLAUDE_MODEL, max_tokens=800, temperature=0.2,
+                    model=cfg.CLAUDE_MODEL, max_tokens=800,
                     system=_system_prompt(),
                     messages=[{"role": "user",
                                "content": _user_msg(first_name, metrics, contexts)}])
