@@ -111,7 +111,8 @@ Discipline, X/10 each, one clause per driver.
 strength, momentum, volatility, price vs S/R and VWAP. Interpreted.
 
 ## Decision Review, Trade by Trade
-The 3-4 most instructive trades. Bold header (symbol, side, result), then:
+Only the trades that teach something (typically 2-4). A trade with nothing
+to teach gets one line or nothing. Bold header (symbol, side, result), then:
 - MARKET READ: 2 dense sentences: confluence and market logic before
   entry, who held control per the reads, what the mix implied.
 - ENTRY: decision justified or not; confirmations present vs missing with
