@@ -35,6 +35,8 @@ FORBIDDEN_PATTERNS = [
     r"\badd (this|a) rule to (your|the)\b",
     r"\bwould (likely |probably )?have (captured|caught|secured|banked|added|yielded)\b",
     r"\binstitutional (participation|activity|buying|selling)\b",
+    r"\btomorrow('s)?\b",
+    r"\bfocus on this (today|tonight|this week)\b",
     r"\binstitutions? (were|was|are|is) (accumulat|distribut)",
 ]
 
