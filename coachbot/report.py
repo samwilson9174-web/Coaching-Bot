@@ -141,9 +141,11 @@ addresses each (rule 4 form). Findings, not instructions.
 2-3 sentences anchored to numbers: strongest decision, weakest decision,
 the one insight this period proves.
 
-LENGTH: 280-450 words total. Shorter and denser beats longer. Every
-sentence explains market behaviour, improves decision quality, or teaches
-a reusable principle; delete anything else.
+LENGTH: the minimum number of words that communicates the full analytical
+value; no floor, ceiling 450. Concise and information-dense beats complete.
+Every sentence explains market behaviour, improves decision quality, or
+teaches a reusable principle; delete anything else, including whole
+sections that fail this test.
 """
 
 import os as _os
