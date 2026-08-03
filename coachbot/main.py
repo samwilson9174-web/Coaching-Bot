@@ -56,12 +56,27 @@ def start_health_server():
 
 # --------------------------- scheduler -------------------------------------
 def _do_run(force=False):
-    log.info("=== run start ===")
-    summary = run_once(force=force)
+    """Run the jobs selected in SCHEDULE_JOBS (coach|report|ib)."""
+    summaries = {}
+    jobs = getattr(config, "SCHEDULE_JOBS", ["coach"]) or ["coach"]
+    for job in jobs:
+        try:
+            if job == "coach":
+                summaries["coach"] = run_once(force=force)
+            elif job == "report":
+                from .report import run_reports
+                summaries["report"] = run_reports(force=force)
+            elif job == "ib":
+                from .ib_pipeline import run_ib_commissions
+                summaries["ib"] = run_ib_commissions(write_report=True)["summary"]
+            else:
+                log.warning("Unknown SCHEDULE_JOBS entry: %r", job)
+        except Exception as e:
+            log.exception("Job %s failed: %s", job, e)
+            summaries[job] = {"error": str(e)}
     _last_run["time"] = datetime.now(timezone.utc).isoformat()
-    _last_run["summary"] = summary
-    log.info("=== run done ===")
-    return summary
+    _last_run["summary"] = summaries
+    return summaries
 
 
 def scheduler_loop():
