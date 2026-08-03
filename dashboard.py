@@ -1,17 +1,14 @@
 """
 dashboard.py — read-only operator dashboard for the coaching bot.
-------------------------------------------------------------------
-Reads the JSONL/JSON files the bot writes to output/. It does NOT run the
-pipeline, call Claude, or send anything — it only displays what already
-happened. Safe to run anywhere; shows real data once the bot runs against
-Brokeret, dummy data before that. Nothing here depends on the data SOURCE.
+Covers every module: coach messages, trade reports, human review, IB
+commissions. Reads the JSONL files the bot writes to output/. It never
+sends anything and never runs the pipeline.
 
 Run locally:  streamlit run dashboard.py
-On Railway:   separate service, same repo, sharing the output volume.
+On Railway:   second service, same repo, sharing the output volume.
 """
 import json
 import os
-from datetime import datetime
 
 import streamlit as st
 
@@ -19,7 +16,6 @@ OUTPUT_DIR = os.environ.get("OUTPUT_DIR", "output")
 AUDIT = os.path.join(OUTPUT_DIR, "audit_log.jsonl")
 REVIEW = os.path.join(OUTPUT_DIR, "human_review_queue.jsonl")
 IB = os.path.join(OUTPUT_DIR, "ib_commissions.jsonl")
-STATE = os.path.join(OUTPUT_DIR, "sent_state.json")
 
 
 def read_jsonl(path):
@@ -37,72 +33,104 @@ def read_jsonl(path):
     return out
 
 
-def latest_day(records):
-    days = [r.get("day_key", "") for r in records if r.get("day_key")]
-    return max(days) if days else None
+def rec_kind(r):
+    return r.get("kind") or "coach"
+
+
+def rec_day(r):
+    dk = r.get("day_key") or ""
+    if ":" in dk:
+        dk = dk.split(":", 1)[1]
+    return dk or (r.get("logged_at") or "")[:10]
+
+
+def delivery_status(r):
+    return (r.get("delivery") or {}).get("status", "?")
 
 
 st.set_page_config(page_title="Coaching bot — operator dashboard", layout="wide")
 st.title("Coaching bot — operator dashboard")
-st.caption("Read-only view of what the bot has done. It does not send anything from here.")
+st.caption("Read-only. Shows what the bot did. Nothing is sent from here.")
 
 audit = read_jsonl(AUDIT)
 review = read_jsonl(REVIEW)
 ib = read_jsonl(IB)
 
-tab_run, tab_review, tab_ib, tab_messages = st.tabs(
-    ["Daily run", "Human review", "IB commissions", "All messages"])
+tab_over, tab_msgs, tab_review, tab_ib = st.tabs(
+    ["Overview", "Messages", "Human review", "IB commissions"])
 
-# ---- Daily run ------------------------------------------------------------
-with tab_run:
-    day = latest_day(audit)
-    today = [r for r in audit if r.get("day_key") == day] if day else []
-    live = any(not r.get("dry_run", True) for r in today)
-
-    top = st.columns([2, 1])
-    with top[0]:
-        st.subheader(f"Latest run: {day or 'no runs yet'}")
-    with top[1]:
-        if not today:
-            st.info("No run recorded yet.")
-        elif live:
+# ---- Overview -------------------------------------------------------------
+with tab_over:
+    if not audit:
+        st.info("No runs recorded yet. Run the coach or report pipeline first.")
+    kinds = sorted({rec_kind(r) for r in audit}) or []
+    for kind in kinds:
+        recs = [r for r in audit if rec_kind(r) == kind]
+        day = max((rec_day(r) for r in recs), default="")
+        today = [r for r in recs if rec_day(r) == day]
+        live = any(not r.get("dry_run", True) for r in today)
+        st.subheader(f"{kind.title()} — latest run {day or '?'}")
+        if live:
             st.error("Mode: LIVE — messages were really sent")
         else:
             st.warning("Mode: DRY-RUN — nothing sent")
-
-    sent = sum(1 for r in today if r.get("delivery", {}).get("status") in ("sent", "DRY_RUN"))
-    failed = sum(1 for r in today if r.get("delivery", {}).get("status") not in ("sent", "DRY_RUN"))
-    blocked = sum(1 for r in today if not r.get("compliance_passed", True))
-    hr = sum(1 for r in review if r.get("logged_at", "")[:10] == (day or "")[:10]) if day else len(review)
-
-    c = st.columns(4)
-    c[0].metric("Sent / drafted", sent)
-    c[1].metric("Delivery failed", failed)
-    c[2].metric("Filter blocked", blocked)
-    c[3].metric("Human review", len(review))
-
-    if today:
-        st.markdown("##### Per-client outcome")
+        sent_real = sum(1 for r in today if delivery_status(r) == "sent")
+        drafted = sum(1 for r in today if delivery_status(r) == "DRY_RUN")
+        failed = sum(1 for r in today
+                     if delivery_status(r) not in ("sent", "DRY_RUN"))
+        blocked = sum(1 for r in today if not r.get("compliance_passed", True))
+        c = st.columns(5)
+        c[0].metric("Delivered", sent_real)
+        c[1].metric("Drafted (dry)", drafted)
+        c[2].metric("Failed", failed)
+        c[3].metric("Filter blocked", blocked)
+        c[4].metric("Recipients in run", len({r.get("login") for r in today}))
         rows = [{"login": r.get("login"), "name": r.get("name"),
-                 "track": r.get("track"),
-                 "compliance": "pass" if r.get("compliance_passed", True) else "BLOCKED",
-                 "delivery": r.get("delivery", {}).get("status", "?")}
+                 "track": r.get("track", ""),
+                 "status": delivery_status(r),
+                 "parts": (r.get("delivery") or {}).get("parts", "")}
                 for r in today]
-        st.dataframe(rows, width='stretch', hide_index=True)
+        if rows:
+            st.dataframe(rows, width="stretch", hide_index=True)
+        st.divider()
+    st.metric("Human review queue (all time)", len(review))
+
+# ---- Messages -------------------------------------------------------------
+with tab_msgs:
+    st.subheader("All generated messages")
+    st.caption("Newest first. This is the audit trail.")
+    kind_opts = sorted({rec_kind(r) for r in audit})
+    k_pick = st.multiselect("Kind", kind_opts, default=kind_opts)
+    stat_opts = sorted({delivery_status(r) for r in audit})
+    s_pick = st.multiselect("Delivery status", stat_opts, default=stat_opts)
+    shown = [r for r in reversed(audit)
+             if rec_kind(r) in k_pick and delivery_status(r) in s_pick]
+    st.write(f"{len(shown)} messages")
+    for r in shown:
+        head = (f"{r.get('name','?')} · {rec_kind(r)} · "
+                f"{delivery_status(r)} · {rec_day(r)}")
+        with st.expander(head):
+            if not r.get("compliance_passed", True):
+                st.error("Blocked by compliance filter")
+            st.text(r.get("message", "(no message)"))
 
 # ---- Human review ---------------------------------------------------------
 with tab_review:
     st.subheader("Human review queue")
-    st.caption("Clients routed away from automated messaging. These need a person, "
-               "not the bot. The dashboard does not send to them.")
+    st.caption("Clients routed away from automated messaging, plus blocked "
+               "or unreachable report cases. These need a person.")
     if not review:
         st.success("Queue is empty.")
     for r in review:
+        label = r.get("kind") or "coach"
         with st.container(border=True):
-            head = st.columns([3, 2])
-            head[0].markdown(f"**{r.get('name','?')}**  ·  login {r.get('login','?')}")
-            head[1].markdown(f"reason: {r.get('routed_reason', r.get('reasons','—'))}")
-            m = r.get("metrics", {})
+            top = st.columns([3, 2])
+            top[0].markdown(f"**{r.get('name','?')}** · login {r.get('login','?')}"
+                            f" · {label}")
+            top[1].markdown(str(r.get("routed_reason")
+                                or r.get("reasons") or r.get("violations")
+                                or "—"))
+            m = r.get("metrics") or {}
             if m:
                 mc = st.columns(4)
                 mc[0].metric("Trades", m.get("num_trades", "—"))
@@ -113,37 +141,24 @@ with tab_review:
 # ---- IB commissions -------------------------------------------------------
 with tab_ib:
     st.subheader("IB commissions")
-    day = latest_day(ib)
-    rows = [r for r in ib if r.get("day_key") == day] if day else ib
-    if not rows:
-        st.info("No IB commission run recorded yet. Run: python -m coachbot.main ib")
+    if not ib:
+        st.info("No IB run recorded. Run: python -m coachbot.main ib")
     else:
-        st.caption(f"Latest run: {day} · lookback {rows[0].get('lookback_days','?')} days")
+        day = max((r.get("day_key", "") for r in ib), default="")
+        rows = [r for r in ib if r.get("day_key") == day] or ib
+        st.caption(f"Latest run: {day} · lookback "
+                   f"{rows[0].get('lookback_days','?')} days")
         total = sum(r.get("total_commission", 0) for r in rows)
-        active = sum(1 for r in rows if r.get("total_commission", 0) > 0)
-        tc = st.columns(3)
-        tc[0].metric("Total payout", f"${total:,.2f}")
-        tc[1].metric("IBs with activity", active)
-        tc[2].metric("IBs total", len(rows))
+        c = st.columns(3)
+        c[0].metric("Total payout", f"${total:,.2f}")
+        c[1].metric("IBs with activity",
+                    sum(1 for r in rows if r.get("total_commission", 0) > 0))
+        c[2].metric("IBs total", len(rows))
         table = [{"IB": r.get("name"), "tier": r.get("tier"),
                   "direct $": round(r.get("direct_commission", 0), 2),
                   "downline $": round(r.get("downline_commission", 0), 2),
                   "total $": round(r.get("total_commission", 0), 2),
                   "clients": r.get("client_count", 0)}
-                 for r in sorted(rows, key=lambda x: x.get("total_commission", 0), reverse=True)]
-        st.dataframe(table, width='stretch', hide_index=True)
-
-# ---- All messages ---------------------------------------------------------
-with tab_messages:
-    st.subheader("All generated messages")
-    st.caption("Every message the bot produced, newest first. This is the audit trail.")
-    tracks = sorted({r.get("track", "?") for r in audit})
-    pick = st.multiselect("Filter by track", tracks, default=tracks)
-    shown = [r for r in reversed(audit) if r.get("track") in pick]
-    st.write(f"{len(shown)} messages")
-    for r in shown:
-        d = r.get("delivery", {}).get("status", "?")
-        with st.expander(f"{r.get('name','?')} · {r.get('track','?')} · {d} · {r.get('logged_at','')[:19]}"):
-            if not r.get("compliance_passed", True):
-                st.error("Blocked by compliance filter")
-            st.write(r.get("message", "(no message)"))
+                 for r in sorted(rows, key=lambda x: x.get("total_commission", 0),
+                                 reverse=True)]
+        st.dataframe(table, width="stretch", hide_index=True)
