@@ -60,6 +60,8 @@ class Config:
 
     # ---- Scheduling ----
     RUN_AT = os.environ.get("RUN_AT", "08:00")             # HH:MM local, daily
+    # Which jobs the daily scheduler runs: comma list of coach|report|ib
+    SCHEDULE_JOBS = [j.strip() for j in os.environ.get("SCHEDULE_JOBS", "coach").split(",") if j.strip()]
     SCHEDULE_ENABLED = _bool("SCHEDULE_ENABLED", "1")
 
     # ---- Classifier thresholds (compliance-tunable) ----
