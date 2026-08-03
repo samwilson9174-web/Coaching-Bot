@@ -79,7 +79,12 @@ def send_message(token, chat_id, text, dry_run=True):
     sent_ids = []
     for i, piece in enumerate(pieces, 1):
         resp = _post(token, "sendMessage", {"chat_id": chat_id, "text": piece,
+                                            "parse_mode": "HTML",
                                             "disable_web_page_preview": True})
+        if (not resp.get("ok")) and "parse entities" in str(resp.get("body", "")).lower():
+            # malformed HTML from the model: deliver as plain text instead
+            resp = _post(token, "sendMessage", {"chat_id": chat_id, "text": piece,
+                                                "disable_web_page_preview": True})
         if resp.get("ok"):
             sent_ids.append(resp["result"]["message_id"])
             continue
