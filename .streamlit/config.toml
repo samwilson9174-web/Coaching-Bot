@@ -1,0 +1,8 @@
+# Milele Prime dashboard theme
+# Obsidian black base, electric lime accent, deep imperial purple surfaces.
+[theme]
+base = "dark"
+primaryColor = "#AEFE02"
+backgroundColor = "#0B0B0F"
+secondaryBackgroundColor = "#221541"
+textColor = "#EDEDED"
