@@ -37,6 +37,8 @@ FORBIDDEN_PATTERNS = [
     r"\binstitutional (participation|activity|buying|selling)\b",
     r"\btomorrow('s)?\b",
     r"\bfocus on this (today|tonight|this week)\b",
+    r"\bi would( not|n't)? have (waited|held|entered|exited|shorted|bought|sold|closed|trailed|added|cut)\b",
+    r"\bi (would not|wouldn't) (short|long|buy|sell|enter|trade|touch)\b",
     r"\binstitutions? (were|was|are|is) (accumulat|distribut)",
 ]
 
