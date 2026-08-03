@@ -353,7 +353,8 @@ def run_reports(force=False):
 
                 result = send_message(config.TELEGRAM_BOT_TOKEN, tg, text, dry_run=dry)
                 store.append_jsonl(config.AUDIT_PATH,
-                                   {"kind": "report", "login": login, "name": name,
+                                   {"kind": "report", "day_key": day_key,
+                                    "login": login, "name": name,
                                     "track": track, "metrics": metrics,
                                     "contexts": contexts, "message": text,
                                     "delivery": result, "dry_run": dry})
